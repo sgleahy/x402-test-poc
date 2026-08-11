@@ -5,6 +5,7 @@ import { resourceServer, ensureFacilitatorReady, BASE_MAINNET_NETWORK } from "./
 import { testRouter } from "./routes/test.js";
 import { elecRouter } from "./routes/elec.js";
 import { startScheduler } from "./scheduler.js";
+import { runMigrations } from "./migrate.js";
 
 const app = express();
 app.use(express.json());
@@ -78,7 +79,19 @@ app.listen(env.PORT, () => {
   console.log(`  --- legacy POC routes still mounted at /api/test/* ---`);
 });
 
-// Starts the price-poll + composite-recompute loop (see scheduler.ts).
-// Safe to call even if DATABASE_URL/GRIDSTATUS_API_KEY aren't set yet --
-// individual ticks log and skip rather than crashing the process.
-startScheduler();
+// Applies the Postgres schema (idempotent, safe on every boot -- see
+// migrate.ts) before starting the poll loop. Deliberately doesn't block
+// app.listen() above on this: if migration fails (e.g. DATABASE_URL not
+// set yet), /api/elec/status should still respond so the problem is
+// diagnosable from outside rather than the whole process refusing to boot.
+(async () => {
+  try {
+    await runMigrations();
+  } catch (err) {
+    console.error("[index] schema migration failed, scheduler will still start but queries will error until this is fixed:", err);
+  }
+  // Starts the price-poll + composite-recompute loop (see scheduler.ts).
+  // Safe to call even if DATABASE_URL/GRIDSTATUS_API_KEY aren't set yet --
+  // individual ticks log and skip rather than crashing the process.
+  startScheduler();
+})();
