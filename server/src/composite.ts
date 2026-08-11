@@ -133,6 +133,49 @@ export async function computeAndStoreLatestComposite(): Promise<CompositeResult 
   }
 }
 
+export interface HubDiagnostic {
+  hub: string;
+  price_age_minutes: number | null;
+  price_fresh: boolean;
+  load_age_minutes: number | null;
+  load_fresh: boolean;
+}
+
+/**
+ * TEMPORARY diagnostic endpoint helper -- root-causing why n_hubs_available
+ * is stuck at 1. Reports only freshness (age in minutes vs the staleness
+ * cutoffs), never the actual price/load values, so it doesn't leak the paid
+ * /api/elec/latest product for free. Safe to remove once the stuck-hub bug
+ * is found and fixed.
+ */
+export async function getHubDiagnostics(): Promise<HubDiagnostic[]> {
+  const out: HubDiagnostic[] = [];
+  for (const hub of HUB_NAMES) {
+    const priceRes = await pool.query<{ interval_start_utc: string }>(
+      `SELECT interval_start_utc FROM hub_prices_live WHERE hub = $1 ORDER BY interval_start_utc DESC LIMIT 1`,
+      [hub],
+    );
+    const loadRes = await pool.query<{ interval_start_utc: string }>(
+      `SELECT interval_start_utc FROM hub_loads_live WHERE hub = $1 ORDER BY interval_start_utc DESC LIMIT 1`,
+      [hub],
+    );
+    const priceAge = priceRes.rows[0]
+      ? (Date.now() - new Date(priceRes.rows[0].interval_start_utc).getTime()) / 60000
+      : null;
+    const loadAge = loadRes.rows[0]
+      ? (Date.now() - new Date(loadRes.rows[0].interval_start_utc).getTime()) / 60000
+      : null;
+    out.push({
+      hub,
+      price_age_minutes: priceAge === null ? null : Math.round(priceAge),
+      price_fresh: priceAge !== null && priceAge <= PRICE_STALENESS_HOURS * 60,
+      load_age_minutes: loadAge === null ? null : Math.round(loadAge),
+      load_fresh: loadAge !== null && loadAge <= LOAD_STALENESS_HOURS * 60,
+    });
+  }
+  return out;
+}
+
 export async function getLatestComposite(): Promise<CompositeResult | null> {
   const res = await pool.query<{
     hour_utc: string;
