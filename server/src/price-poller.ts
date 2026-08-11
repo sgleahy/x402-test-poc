@@ -46,13 +46,10 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
   for (const [i, cfg] of HUBS.entries()) {
     if (i > 0) await sleep(REQUEST_SPACING_MS);
 
-    // Day-ahead datasets publish once/day (often the prior afternoon for the
-    // next day) -- need a wider lookback than real-time hourly/15-min data.
-    // ISONE's "_final" dataset is also treated as wide-lookback: it's a
-    // finalized/corrected feed that lags behind real-time by more than a
-    // few hours (a 6h window came back empty on the first live poll).
-    const lookbackHours = cfg.isDayAhead || cfg.hub === "ISONE_MASSHUB" ? 48 : 6;
-    const start = new Date(now.getTime() - lookbackHours * 60 * 60 * 1000);
+    // Lookback window is per-hub (see cfg.maxLagHours in hubs.ts) -- day-ahead
+    // datasets and the "final"/settled feeds (ISONE, MISO, PJM) all need much
+    // wider windows than a true real-time feed like ERCOT's 15-min data.
+    const start = new Date(now.getTime() - cfg.maxLagHours * 60 * 60 * 1000);
 
     const url = new URL(`${BASE}/${cfg.dataset}/query/location/${encodeURIComponent(cfg.location)}`);
     url.searchParams.set("api_key", env.GRIDSTATUS_API_KEY);
