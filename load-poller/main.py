@@ -44,6 +44,7 @@ Requires Python 3.11+.
     python3 main.py
 """
 import os
+import signal
 import sys
 import time
 import traceback
@@ -203,8 +204,26 @@ PULLERS = {
 }
 
 
+HUB_TIMEOUT_SECONDS = 45
+
+
+class HubTimeout(Exception):
+    pass
+
+
+def _timeout_handler(signum, frame):
+    raise HubTimeout()
+
+
 def tick(conn):
+    # Each ISO's pull goes over a real HTTP request with no built-in timeout
+    # in gridstatus itself. Observed live: NYISO's fetch hung indefinitely
+    # on first deploy and blocked every hub queued after it for the rest of
+    # the poll cycle. A hard per-hub alarm means one slow/unresponsive ISO
+    # costs at most HUB_TIMEOUT_SECONDS, not the whole cycle.
     for hub in HUBS:
+        signal.signal(signal.SIGALRM, _timeout_handler)
+        signal.alarm(HUB_TIMEOUT_SECONDS)
         try:
             rows = PULLERS[hub]()
             n = upsert_load(conn, hub, rows)
@@ -212,9 +231,13 @@ def tick(conn):
                 print(f"[{hub}] upserted {n} row(s), latest={rows[-1][0]} load={rows[-1][1]:.0f} MW")
             else:
                 print(f"[{hub}] no new data this tick")
+        except HubTimeout:
+            print(f"[{hub}] FAILED: timed out after {HUB_TIMEOUT_SECONDS}s")
         except Exception as e:
             print(f"[{hub}] FAILED: {e}")
             traceback.print_exc()
+        finally:
+            signal.alarm(0)
 
 
 def main():
