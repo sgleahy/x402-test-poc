@@ -15,6 +15,17 @@ import { HUBS } from "./hubs.js";
 
 const BASE = "https://api.gridstatus.io/v1/datasets";
 
+// GridStatus.io's default plan caps at 3 requests/second (confirmed via
+// their API usage docs). Observed live: firing all 7 hub requests back to
+// back tripped HTTP 429 on 6 of 7. A fixed delay between requests keeps us
+// well under that regardless of plan tier -- 400ms means the full 7-hub
+// pass takes under 3s, trivial against a 15-minute poll interval.
+const REQUEST_SPACING_MS = 400;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 interface GridStatusRow {
   interval_start_utc: string;
   [key: string]: unknown;
@@ -32,10 +43,15 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
   const now = new Date();
   const results: PricePollResult[] = [];
 
-  for (const cfg of HUBS) {
+  for (const [i, cfg] of HUBS.entries()) {
+    if (i > 0) await sleep(REQUEST_SPACING_MS);
+
     // Day-ahead datasets publish once/day (often the prior afternoon for the
     // next day) -- need a wider lookback than real-time hourly/15-min data.
-    const lookbackHours = cfg.isDayAhead ? 48 : 6;
+    // ISONE's "_final" dataset is also treated as wide-lookback: it's a
+    // finalized/corrected feed that lags behind real-time by more than a
+    // few hours (a 6h window came back empty on the first live poll).
+    const lookbackHours = cfg.isDayAhead || cfg.hub === "ISONE_MASSHUB" ? 48 : 6;
     const start = new Date(now.getTime() - lookbackHours * 60 * 60 * 1000);
 
     const url = new URL(`${BASE}/${cfg.dataset}/query/location/${encodeURIComponent(cfg.location)}`);
