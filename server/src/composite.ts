@@ -215,7 +215,7 @@ export async function getCompositeHistory(sinceHours: number): Promise<Composite
      ORDER BY hour_utc ASC`,
   );
   return res.rows.map((row) => ({
-    hourUtc: row.hourUtc,
+    hourUtc: row.hour_utc,
     elecPrice: Number(row.elec_price),
     nHubsAvailable: row.n_hubs_available,
     nHubsCapped: row.n_hubs_capped,
