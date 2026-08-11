@@ -12,11 +12,14 @@
  * math, just pushed into SQL since the rolling window lives in the DB now.
  */
 import { pool } from "./pg.js";
-import { HUB_NAMES } from "./hubs.js";
+import { HUBS } from "./hubs.js";
 
 const WINSOR_WINDOW_DAYS = 30;
 const MIN_PERIODS_FOR_WINSOR = 24; // need >=1 day of trailing history before capping kicks in
-const PRICE_STALENESS_HOURS = 6; // ignore a hub's price if older than this
+// Price staleness is per-hub now (see HubConfig.maxLagHours in hubs.ts) --
+// day-ahead and "final"/settled feeds (ISONE, MISO, PJM) genuinely publish
+// with up to ~a day of lag, so a single global cutoff was wrongly excluding
+// them even after price-poller.ts successfully fetched and stored their data.
 const LOAD_STALENESS_HOURS = 12; // load updates less frequently than price
 
 export interface HubDetail {
@@ -42,10 +45,11 @@ export async function computeAndStoreLatestComposite(): Promise<CompositeResult 
     const detail: HubDetail[] = [];
     let latestIntervalUtc: string | null = null;
 
-    for (const hub of HUB_NAMES) {
+    for (const cfg of HUBS) {
+      const hub = cfg.hub;
       const priceRes = await client.query<{ interval_start_utc: string; price_usd_mwh: string }>(
         `SELECT interval_start_utc, price_usd_mwh FROM hub_prices_live
-         WHERE hub = $1 AND interval_start_utc > now() - interval '${PRICE_STALENESS_HOURS} hours'
+         WHERE hub = $1 AND interval_start_utc > now() - interval '${cfg.maxLagHours} hours'
          ORDER BY interval_start_utc DESC LIMIT 1`,
         [hub],
       );
@@ -150,7 +154,8 @@ export interface HubDiagnostic {
  */
 export async function getHubDiagnostics(): Promise<HubDiagnostic[]> {
   const out: HubDiagnostic[] = [];
-  for (const hub of HUB_NAMES) {
+  for (const cfg of HUBS) {
+    const hub = cfg.hub;
     const priceRes = await pool.query<{ interval_start_utc: string }>(
       `SELECT interval_start_utc FROM hub_prices_live WHERE hub = $1 ORDER BY interval_start_utc DESC LIMIT 1`,
       [hub],
@@ -168,7 +173,7 @@ export async function getHubDiagnostics(): Promise<HubDiagnostic[]> {
     out.push({
       hub,
       price_age_minutes: priceAge === null ? null : Math.round(priceAge),
-      price_fresh: priceAge !== null && priceAge <= PRICE_STALENESS_HOURS * 60,
+      price_fresh: priceAge !== null && priceAge <= cfg.maxLagHours * 60,
       load_age_minutes: loadAge === null ? null : Math.round(loadAge),
       load_fresh: loadAge !== null && loadAge <= LOAD_STALENESS_HOURS * 60,
     });
@@ -210,7 +215,7 @@ export async function getCompositeHistory(sinceHours: number): Promise<Composite
      ORDER BY hour_utc ASC`,
   );
   return res.rows.map((row) => ({
-    hourUtc: row.hour_utc,
+    hourUtc: row.hourUtc,
     elecPrice: Number(row.elec_price),
     nHubsAvailable: row.n_hubs_available,
     nHubsCapped: row.n_hubs_capped,
