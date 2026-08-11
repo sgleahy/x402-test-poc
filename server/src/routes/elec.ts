@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { requireSessionToken } from "../auth-middleware.js";
 import { issueSessionToken } from "../jwt.js";
-import { getLatestComposite, getCompositeHistory } from "../composite.js";
+import { getLatestComposite, getCompositeHistory, getHubDiagnostics } from "../composite.js";
 
 export const elecRouter = Router();
 
@@ -12,8 +12,11 @@ export const elecRouter = Router();
 elecRouter.get("/status", async (_req, res) => {
   try {
     const latest = await getLatestComposite();
+    // TEMPORARY: per-hub freshness diagnostics while root-causing why
+    // n_hubs_available is stuck low. Remove once resolved -- see composite.ts.
+    const hubDiagnostics = await getHubDiagnostics();
     if (!latest) {
-      res.json({ status: "ok", composite_available: false });
+      res.json({ status: "ok", composite_available: false, hub_diagnostics: hubDiagnostics });
       return;
     }
     const ageMinutes = (Date.now() - new Date(latest.hourUtc).getTime()) / 60000;
@@ -23,6 +26,7 @@ elecRouter.get("/status", async (_req, res) => {
       latest_hour_utc: latest.hourUtc,
       age_minutes: Math.round(ageMinutes),
       n_hubs_available: latest.nHubsAvailable,
+      hub_diagnostics: hubDiagnostics,
     });
   } catch (err) {
     res.status(500).json({ status: "error", error: (err as Error).message });
