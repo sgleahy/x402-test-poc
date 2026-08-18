@@ -88,11 +88,11 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
     url.searchParams.set("limit", "200");
 
     try {
-      const res = await fetch(url.toString());
-      if (!res.ok) {
-        results.push({ hub: cfg.hub, ok: false, error: `HTTP ${res.status}` });
-        continue;
-      }
+            const res = await fetch(url.toString(), {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
+      });
       const body = (await res.json()) as { data?: GridStatusRow[] };
       const rows = body.data ?? [];
       if (rows.length === 0) {
