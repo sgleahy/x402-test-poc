@@ -67,11 +67,12 @@ async function getIdToken(): Promise<string> {
   url.searchParams.set("scope", "openid fec253ea-0d06-4272-a5e6-b478baeecd70 offline_access");
   url.searchParams.set("client_id", CLIENT_ID);
 
-  const res = await fetch(url.toString(), { method: "POST" });
-  if (!res.ok) {
-    const bodyText = await res.text().catch(() => "");
-    throw new Error(`ERCOT auth failed: HTTP ${res.status} ${bodyText.slice(0, 200)}`);
-  }
+    const res = await fetch(url.toString(), {
+    method: "POST",
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+    },
+  });
 
   const body = (await res.json()) as {
     id_token?: string;
