@@ -12,6 +12,7 @@
 import { pool } from "./pg.js";
 import { env } from "./env.js";
 import { HUBS } from "./hubs.js";
+import { pollErcotHubAvg } from "./ercot-direct.js";
 
 const BASE = "https://api.gridstatus.io/v1/datasets";
 
@@ -45,6 +46,24 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
 
   for (const [i, cfg] of HUBS.entries()) {
     if (i > 0) await sleep(REQUEST_SPACING_MS);
+
+    // ERCOT is the first hub moved off GridStatus.io onto a direct ISO
+    // connection (see ercot-direct.ts for the full rationale -- GridStatus's
+    // ToS prohibits building a competing/resold product on their data, which
+    // conflicts with the x402 historical-data business line). The other 6
+    // hubs stay on GridStatus for now and will move over one at a time as
+    // each ISO's own API access is set up.
+    if (cfg.hub === "ERCOT_HB_HUBAVG") {
+      const ercotResult = await pollErcotHubAvg();
+      results.push({
+        hub: cfg.hub,
+        ok: ercotResult.ok,
+        intervalStartUtc: ercotResult.intervalStartUtc,
+        price: ercotResult.price,
+        error: ercotResult.error,
+      });
+      continue;
+    }
 
     // Lookback window is per-hub (see cfg.maxLagHours in hubs.ts) -- day-ahead
     // datasets and the "final"/settled feeds (ISONE, MISO, PJM) all need much
