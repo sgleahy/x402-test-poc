@@ -13,6 +13,7 @@ import { pool } from "./pg.js";
 import { env } from "./env.js";
 import { HUBS } from "./hubs.js";
 import { pollErcotHubAvg } from "./ercot-direct.js";
+import { pollMisoIndianaHub } from "./miso-direct.js";
 
 const BASE = "https://api.gridstatus.io/v1/datasets";
 
@@ -62,7 +63,17 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
         price: ercotResult.price,
         error: ercotResult.error,
       });
+      continue;     if (cfg.hub === "MISO_INDIANA") {
+      const misoResult = await pollMisoIndianaHub();
+      results.push({
+        hub: cfg.hub,
+        ok: misoResult.ok,
+        intervalStartUtc: misoResult.intervalStartUtc,
+        price: misoResult.price,
+        error: misoResult.error,
+      });
       continue;
+    }
     }
 
     // Lookback window is per-hub (see cfg.maxLagHours in hubs.ts) -- day-ahead
