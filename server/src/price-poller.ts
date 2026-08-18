@@ -63,7 +63,12 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
         price: ercotResult.price,
         error: ercotResult.error,
       });
-      continue;     if (cfg.hub === "MISO_INDIANA") {
+      continue;
+    }
+
+    // MISO_INDIANA moved off GridStatus onto MISO's own Data Exchange
+    // Pricing API -- see miso-direct.ts.
+    if (cfg.hub === "MISO_INDIANA") {
       const misoResult = await pollMisoIndianaHub();
       results.push({
         hub: cfg.hub,
@@ -74,6 +79,59 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
       });
       continue;
     }
+
+    // Lookback window is per-hub (see cfg.maxLagHours in hubs.ts) -- day-ahead
+    // datasets and the "final"/settled feeds (ISONE, PJM) all need much
+    // wider windows than a true real-time feed like ERCOT's 15-min data.
+    const start = new Date(now.getTime() - cfg.maxLagHours * 60 * 60 * 1000);
+
+    const url = new URL(`${BASE}/${cfg.dataset}/query/location/${encodeURIComponent(cfg.location)}`);
+    url.searchParams.set("api_key", env.GRIDSTATUS_API_KEY);
+    url.searchParams.set("start_time", start.toISOString());
+    url.searchParams.set("end_time", now.toISOString());
+    url.searchParams.set("limit", "200");
+
+    try {
+      const res = await fetch(url.toString(), {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
+      });
+      if (!res.ok) {
+        results.push({ hub: cfg.hub, ok: false, error: `HTTP ${res.status}` });
+        continue;
+      }
+      const body = (await res.json()) as { data?: GridStatusRow[] };
+      const rows = body.data ?? [];
+      if (rows.length === 0) {
+        results.push({ hub: cfg.hub, ok: false, error: "no rows in lookback window" });
+        continue;
+      }
+
+      // Rows come back ascending by interval_start_utc -- take the newest.
+      const latest = rows[rows.length - 1];
+      const price = latest[cfg.priceField];
+      if (typeof price !== "number" || !latest.interval_start_utc) {
+        results.push({ hub: cfg.hub, ok: false, error: "missing price/interval in response row" });
+        continue;
+      }
+
+      await pool.query(
+        `INSERT INTO hub_prices_live (hub, interval_start_utc, price_usd_mwh)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (hub, interval_start_utc)
+         DO UPDATE SET price_usd_mwh = EXCLUDED.price_usd_mwh, fetched_at = now()`,
+        [cfg.hub, latest.interval_start_utc, price],
+      );
+
+      results.push({ hub: cfg.hub, ok: true, intervalStartUtc: latest.interval_start_utc, price });
+    } catch (err) {
+      results.push({ hub: cfg.hub, ok: false, error: (err as Error).message });
+    }
+  }
+
+  return results;
+}
     }
 
     // Lookback window is per-hub (see cfg.maxLagHours in hubs.ts) -- day-ahead
