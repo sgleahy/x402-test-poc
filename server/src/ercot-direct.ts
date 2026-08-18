@@ -202,10 +202,11 @@ export async function pollErcotHubAvg(): Promise<ErcotPollResult> {
     url.searchParams.set("deliveryDateFrom", yesterday);
     url.searchParams.set("deliveryDateTo", today);
 
-    const res = await fetch(url.toString(), {
+        const res = await fetch(url.toString(), {
       headers: {
         Authorization: `Bearer ${token}`,
         "Ocp-Apim-Subscription-Key": subscriptionKey,
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
       },
     });
 
