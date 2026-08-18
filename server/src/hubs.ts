@@ -42,7 +42,7 @@ export const HUBS: HubConfig[] = [
   { hub: "ERCOT_HB_HUBAVG", dataset: "ercot_spp_real_time_15_min", location: "HB_HUBAVG", priceField: "spp", isDayAhead: false, maxLagHours: 6 },
   { hub: "PJM_WEST", dataset: "pjm_lmp_real_time_hourly", location: "WESTERN HUB", priceField: "lmp", isDayAhead: false, maxLagHours: 30 },
   { hub: "CAISO_NP15", dataset: "caiso_lmp_day_ahead_hourly", location: "TH_NP15_GEN-APND", priceField: "lmp", isDayAhead: true, maxLagHours: 48 },
-  { hub: "MISO_INDIANA", dataset: "miso_lmp_real_time_hourly_ex_post_final", location: "INDIANA.HUB", priceField: "lmp", isDayAhead: false, maxLagHours: 30 },
+  { hub: "MISO_INDIANA", dataset: "miso_lmp_real_time_hourly_ex_post_final", location: "INDIANA.HUB", priceField: "lmp", isDayAhead: false, maxLagHours: 3 },
   { hub: "NYISO_ZONEJ", dataset: "nyiso_lmp_day_ahead_hourly", location: "N.Y.C.", priceField: "lmp", isDayAhead: true, maxLagHours: 48 },
   { hub: "ISONE_MASSHUB", dataset: "isone_lmp_real_time_hourly_final", location: ".H.INTERNAL_HUB", priceField: "lmp", isDayAhead: false, maxLagHours: 30 },
   { hub: "SPP_SOUTH", dataset: "spp_lmp_day_ahead_hourly", location: "SPPSOUTH_HUB", priceField: "lmp", isDayAhead: true, maxLagHours: 48 },
