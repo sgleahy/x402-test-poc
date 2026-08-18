@@ -117,8 +117,11 @@ export async function pollMisoIndianaHub(): Promise<MisoPollResult> {
       url.searchParams.set("preliminaryFinal", "Preliminary");
       url.searchParams.set("timeResolution", "5min");
 
-      const res = await fetch(url.toString(), {
-        headers: { "Ocp-Apim-Subscription-Key": subscriptionKey },
+            const res = await fetch(url.toString(), {
+        headers: {
+          "Ocp-Apim-Subscription-Key": subscriptionKey,
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        },
       });
 
       if (!res.ok) {
