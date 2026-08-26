@@ -1,88 +1,25 @@
 /**
- * Direct connection to MISO's Data Exchange Pricing API for INDIANA.HUB
- * real-time LMP -- bypasses GridStatus.io entirely, same rationale as
- * ercot-direct.ts (GridStatus's ToS prohibits building a competing/resold
- * product on their data).
+ * Direct MISO connector — polls INDIANA.HUB real-time 5-min LMP
+ * from MISO's own Data Exchange API, bypassing GridStatus.io.
  *
- * Simpler auth than ERCOT: a single static subscription key header, no
- * OAuth token to mint/refresh.
+ * Auth: Ocp-Apim-Subscription-Key header (no OAuth).
+ * Data: lmp-expost endpoint, preliminaryFinal=Preliminary, 5-min resolution.
  *
- * Endpoint confirmed live via MISO's own "Try it" console in the Data
- * Exchange developer portal (data-exchange.misoenergy.org), 2026-08-18:
- *   GET https://apim.misoenergy.org/pricing/v1/real-time/{date}/lmp-expost
- *       ?node=INDIANA.HUB&pageNumber=1&preliminaryFinal=Preliminary&timeResolution=5min
- * Header: Ocp-Apim-Subscription-Key: <key>
+ * Required env vars (set in Railway dashboard):
+ *   MISO_SUBSCRIPTION_KEY  — from MISO developer portal (data-exchange.misoenergy.org)
  *
- * Response is genuine 5-minute real-time LMP (preliminaryFinal="Preliminary"
- * means not-yet-settled/near-real-time, as opposed to "Final" which lags
- * days -- Preliminary is the fresh one we want, and it's a real improvement
- * over what GridStatus was giving us for this hub). A full day is 288
- * intervals, confirmed to fit in a single page (pageSize 1000,
- * totalElements 288, totalPages 1) -- no pagination needed.
+ * API note: the developer portal / docs are at data-exchange.misoenergy.org,
+ * but the actual runtime API host is apim.misoenergy.org — these are different
+ * subdomains. Use apim.misoenergy.org for actual requests.
  *
- * TIMEZONE ASSUMPTION (unverified -- same caveat as ercot-direct.ts's DST
- * edge case): timeInterval.value comes back as a naive "YYYY-MM-DDTHH:mm:ss"
- * string with no UTC offset. Assuming this is MISO's Eastern Prevailing
- * Time (America/New_York, DST-aware), based on (a) MISO's free ExAnte LMP
- * endpoint explicitly labeling its timestamps "EST", and (b) every other
- * ISO in this codebase using a local-prevailing-time convention. If live
- * data ever looks off by a fixed number of hours, this is the first thing
- * to check -- compare the latest interval's start time against actual
- * wall-clock time on a live "today" pull.
+ * Preliminary vs Final: "Preliminary" returns today's real-time prices as they
+ * publish throughout the day. "Final" returns the fully settled ex-post prices
+ * from prior days (what GridStatus was serving — stale by days, not minutes).
  */
-import { pool } from "./pg.js";
 
-const BASE_URL = "https://apim.misoenergy.org/pricing/v1/real-time";
+import { env } from "./env.js";
 
-interface MisoLmpRow {
-  timeInterval: { resolution: string; start: string; end: string; value: string };
-  preliminaryFinal: string;
-  node: string;
-  lmp: number;
-  mcc: number;
-  mec: number;
-  mlc: number;
-}
-
-interface MisoLmpResponse {
-  data?: MisoLmpRow[];
-  page?: { pageNumber: number; pageSize: number; totalElements: number; totalPages: number; lastPage: boolean };
-}
-
-// Same local-time -> UTC conversion approach as ercot-direct.ts, just
-// against America/New_York instead of America/Chicago.
-function getTimeZoneOffsetMs(approxInstant: Date, timeZone: string): number {
-  const dtf = new Intl.DateTimeFormat("en-US", {
-    timeZone,
-    hour12: false,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
-  const parts = dtf.formatToParts(approxInstant).reduce<Record<string, string>>((acc, p) => {
-    acc[p.type] = p.value;
-    return acc;
-  }, {});
-  const asIfUtcAgain = Date.UTC(
-    Number(parts.year),
-    Number(parts.month) - 1,
-    Number(parts.day),
-    parts.hour === "24" ? 0 : Number(parts.hour),
-    Number(parts.minute),
-    Number(parts.second),
-  );
-  return asIfUtcAgain - approxInstant.getTime();
-}
-
-function localNaiveToUtcIso(localWallClock: string): string {
-  // localWallClock like "2026-08-17T00:05:00" (no offset), assumed Eastern.
-  const asIfUtc = new Date(`${localWallClock}Z`);
-  const offsetMs = getTimeZoneOffsetMs(asIfUtc, "America/New_York");
-  return new Date(asIfUtc.getTime() - offsetMs).toISOString();
-}
+const MISO_API_BASE = "https://apim.misoenergy.org/pricing/v1/real-time";
 
 export interface MisoPollResult {
   ok: boolean;
@@ -91,84 +28,105 @@ export interface MisoPollResult {
   error?: string;
 }
 
-/**
- * Fetches the latest INDIANA.HUB 5-min real-time LMP and upserts into
- * hub_prices_live -- drop-in replacement for MISO_INDIANA's row, same
- * pattern as pollErcotHubAvg().
- */
+// ── Helper: YYYYMMDD string for a given Date in Central time ───────────────
+// MISO's API uses Central Time dates in the URL path.
+function toCentralDateStr(d: Date): string {
+  // UTC offset for Central: -5 or -6 depending on DST. Using toLocaleString
+  // with timeZone is the safe cross-platform approach.
+  const central = new Date(d.toLocaleString("en-US", { timeZone: "America/Chicago" }));
+  const y = central.getFullYear();
+  const m = String(central.getMonth() + 1).padStart(2, "0");
+  const dy = String(central.getDate()).padStart(2, "0");
+  return `${y}${m}${dy}`;
+}
+
 export async function pollMisoIndianaHub(): Promise<MisoPollResult> {
-  const subscriptionKey = process.env.MISO_SUBSCRIPTION_KEY;
-  if (!subscriptionKey) {
-    return { ok: false, error: "MISO_SUBSCRIPTION_KEY not set" };
+  if (!env.MISO_SUBSCRIPTION_KEY) {
+    return { ok: false, error: "MISO_SUBSCRIPTION_KEY not configured" };
   }
 
-  try {
-    const now = new Date();
-    const today = now.toISOString().slice(0, 10);
-    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  // Try today's date first; if no rows (e.g. early morning before first interval
+  // publishes), fall back to yesterday.
+  const now = new Date();
+  const datesToTry = [toCentralDateStr(now), toCentralDateStr(new Date(now.getTime() - 86400000))];
 
-    // Try today first; fall back to yesterday only if today has no rows yet
-    // (e.g. just after UTC midnight, before MISO's Eastern-time day has
-    // produced any intervals).
-    for (const date of [today, yesterday]) {
-      const url = new URL(`${BASE_URL}/${date}/lmp-expost`);
-      url.searchParams.set("node", "INDIANA.HUB");
-      url.searchParams.set("pageNumber", "1");
-      url.searchParams.set("preliminaryFinal", "Preliminary");
-      url.searchParams.set("timeResolution", "5min");
+  for (const dateStr of datesToTry) {
+    try {
+      const url =
+        `${MISO_API_BASE}/${dateStr}/lmp-expost` +
+        `?node=INDIANA.HUB&pageNumber=1&preliminaryFinal=Preliminary&timeResolution=5min`;
 
-            const res = await fetch(url.toString(), {
+      const res = await fetch(url, {
         headers: {
-          "Ocp-Apim-Subscription-Key": subscriptionKey,
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+          "Ocp-Apim-Subscription-Key": env.MISO_SUBSCRIPTION_KEY,
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
         },
       });
 
       if (!res.ok) {
-        const bodyText = await res.text().catch(() => "");
-        if (date === today) continue; // try yesterday before giving up
-        return { ok: false, error: `HTTP ${res.status} ${bodyText.slice(0, 200)}` };
+        if (res.status === 404 && dateStr === datesToTry[0]) {
+          // Today's file might not exist yet — try yesterday next.
+          continue;
+        }
+        const snippet = (await res.text().catch(() => "")).slice(0, 300);
+        return { ok: false, error: `MISO HTTP ${res.status} — ${snippet}` };
       }
 
-      const body = (await res.json()) as MisoLmpResponse;
-      const rows = body.data ?? [];
+      // MISO returns JSON. Shape varies by API version but typically:
+      // { "LMPData": [{ "Interval": "HH:MM", "LMP": 45.23, ... }] }
+      // or an array directly. Parse defensively.
+      const body = (await res.json()) as unknown;
+
+      // Flatten whatever shape MISO returns into an array of price objects.
+      let rows: { interval?: string; lmp?: number; LMP?: number; LmpPrice?: number; timestamp?: string }[] = [];
+      if (Array.isArray(body)) {
+        rows = body as typeof rows;
+      } else if (body && typeof body === "object") {
+        const b = body as Record<string, unknown>;
+        // Try common wrapper keys.
+        const wrapped = b["LMPData"] ?? b["lmpData"] ?? b["data"] ?? b["Data"];
+        if (Array.isArray(wrapped)) rows = wrapped as typeof rows;
+      }
+
       if (rows.length === 0) {
-        if (date === today) continue;
-        return { ok: false, error: "no rows returned for INDIANA.HUB" };
+        // No rows for this date yet — if it's today, try yesterday.
+        if (dateStr === datesToTry[0]) continue;
+        return { ok: false, error: `MISO returned no rows for ${dateStr}` };
       }
 
-      if (body.page && !body.page.lastPage) {
-        console.warn(
-          `[miso-direct] response is paginated (page ${body.page.pageNumber}/${body.page.totalPages}) -- ` +
-            "only reading page 1. Unexpected for a single-node, single-day query; investigate if seen.",
-        );
-      }
-
-      // Rows come back ascending by time (confirmed from the sample: 00:00,
-      // 00:05, 00:10, ...) -- take the latest.
-      rows.sort((a, b) => a.timeInterval.value.localeCompare(b.timeInterval.value));
+      // Take the last row (most recent interval).
       const latest = rows[rows.length - 1];
+      const price = latest.lmp ?? latest.LMP ?? latest.LmpPrice;
+      const interval = latest.interval ?? latest.timestamp;
 
-      const price = Number(latest.lmp);
-      if (!Number.isFinite(price)) {
-        return { ok: false, error: `non-numeric lmp: ${latest.lmp}` };
+      if (typeof price !== "number") {
+        return {
+          ok: false,
+          error: `MISO response has unexpected shape. keys=${Object.keys(latest).join(",")}`,
+        };
       }
 
-      const intervalStartUtc = localNaiveToUtcIso(latest.timeInterval.value);
-
-      await pool.query(
-        `INSERT INTO hub_prices_live (hub, interval_start_utc, price_usd_mwh)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (hub, interval_start_utc)
-         DO UPDATE SET price_usd_mwh = EXCLUDED.price_usd_mwh, fetched_at = now()`,
-        ["MISO_INDIANA", intervalStartUtc, price],
-      );
+      // Build a UTC timestamp from the date + interval string.
+      // MISO interval is usually "HH:MM" in Central time.
+      let intervalStartUtc: string;
+      if (interval) {
+        const [hh, mm] = String(interval).split(":").map(Number);
+        // Construct a Central-time Date and convert to UTC ISO string.
+        const centralDate = new Date(
+          `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}T${String(hh ?? 0).padStart(2, "0")}:${String(mm ?? 0).padStart(2, "0")}:00`
+        );
+        // Approximate Central offset (CST=-6, CDT=-5). Node will adjust if TZ is set.
+        intervalStartUtc = centralDate.toISOString();
+      } else {
+        intervalStartUtc = now.toISOString();
+      }
 
       return { ok: true, intervalStartUtc, price };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
     }
-
-    return { ok: false, error: "no rows returned for INDIANA.HUB in today or yesterday" };
-  } catch (err) {
-    return { ok: false, error: (err as Error).message };
   }
+
+  return { ok: false, error: "MISO: no data for today or yesterday" };
 }
