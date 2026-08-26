@@ -27,6 +27,11 @@ export const env = {
   DATABASE_URL: process.env.DATABASE_URL ?? "",
   GRIDSTATUS_API_KEY: process.env.GRIDSTATUS_API_KEY ?? "",
   POLL_INTERVAL_MINUTES: Number(process.env.POLL_INTERVAL_MINUTES ?? 15),
+  // ── Direct ISO connector credentials ─────────────────────────────────────
+  ERCOT_API_USERNAME: process.env.ERCOT_API_USERNAME ?? "",
+  ERCOT_API_PASSWORD: process.env.ERCOT_API_PASSWORD ?? "",
+  ERCOT_SUBSCRIPTION_KEY: process.env.ERCOT_SUBSCRIPTION_KEY ?? "",
+  MISO_SUBSCRIPTION_KEY: process.env.MISO_SUBSCRIPTION_KEY ?? "",
 };
 
 export function requireDatabaseUrl(): string {
