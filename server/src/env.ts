@@ -32,6 +32,10 @@ export const env = {
   ERCOT_API_PASSWORD: process.env.ERCOT_API_PASSWORD ?? "",
   ERCOT_SUBSCRIPTION_KEY: process.env.ERCOT_SUBSCRIPTION_KEY ?? "",
   MISO_SUBSCRIPTION_KEY: process.env.MISO_SUBSCRIPTION_KEY ?? "",
+  // ── Cloudflare Worker proxy (routes ISO requests through non-cloud IPs) ───
+  // Set both in Railway dashboard once the Worker is deployed.
+  PROXY_URL: process.env.PROXY_URL ?? "",
+  PROXY_SECRET: process.env.proxysecret ?? "",
 };
 
 export function requireDatabaseUrl(): string {
