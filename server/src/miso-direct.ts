@@ -18,6 +18,7 @@
  */
 
 import { env } from "./env.js";
+import { proxyFetch } from "./proxy-fetch.js";
 
 const MISO_API_BASE = "https://apim.misoenergy.org/pricing/v1/real-time";
 
@@ -56,7 +57,8 @@ export async function pollMisoIndianaHub(): Promise<MisoPollResult> {
         `${MISO_API_BASE}/${dateStr}/lmp-expost` +
         `?node=INDIANA.HUB&pageNumber=1&preliminaryFinal=Preliminary&timeResolution=5min`;
 
-      const res = await fetch(url, {
+      // apim.misoenergy.org blocks Railway IPs — route through Cloudflare proxy.
+      const res = await proxyFetch(url, {
         headers: {
           "Ocp-Apim-Subscription-Key": env.MISO_SUBSCRIPTION_KEY,
           "Accept": "application/json",
