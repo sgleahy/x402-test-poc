@@ -26,7 +26,7 @@ export async function proxyFetch(url: string, options?: RequestInit): Promise<Re
 
   // Build the forwarded request: same method/headers/body, but sent to the
   // Cloudflare Worker URL. The Worker reads X-Target-URL and forwards there.
-  const headers = new Headers(options?.headers as HeadersInit | undefined);
+  const headers = new Headers((options?.headers ?? {}) as Record<string, string>);
   headers.set("X-Target-URL", url);
   headers.set("X-Proxy-Secret", env.PROXY_SECRET);
 
