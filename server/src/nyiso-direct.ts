@@ -18,6 +18,8 @@
  * the current trading hour, not a real-time measurement.
  */
 
+import { proxyFetch } from "./proxy-fetch.js";
+
 export interface NyisoPollResult {
   ok: boolean;
   intervalStartUtc?: string;
@@ -58,7 +60,8 @@ export async function pollNyisoZoneJ(): Promise<NyisoPollResult> {
     try {
       const url = `${NYISO_BASE}/${dateStr}damlbmp_zone.csv`;
 
-      const res = await fetch(url, {
+      // mis.nyiso.com blocks Railway IPs — route through Cloudflare proxy.
+      const res = await proxyFetch(url, {
         headers: {
           "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
           "Accept": "text/csv, text/plain, */*",
