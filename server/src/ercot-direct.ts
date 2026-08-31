@@ -16,6 +16,7 @@
  * If 403s persist → escalate to Railway Static IP (Pro plan) or proxy.
  */
 import { env } from "./env.js";
+import { proxyFetch } from "./proxy-fetch.js";
 
 // ── Browser-like headers that Akamai / Cloudflare WAFs expect ──────────────
 // Using a realistic Chrome on macOS UA. Without these, Node's default
@@ -121,7 +122,9 @@ export async function pollErcotHubAvg(): Promise<ErcotPollResult> {
     url.searchParams.set("settlementPointNames", "HB_HUBAVG");
     url.searchParams.set("size", "100");
 
-    const res = await fetch(url.toString(), {
+    // Data endpoint: api.ercot.com is blocked by Akamai WAF on Railway IPs.
+    // Route through Cloudflare Worker proxy — token fetch (Azure B2C) stays direct.
+    const res = await proxyFetch(url.toString(), {
       headers: {
         ...BROWSER_HEADERS,
         "Authorization": `Bearer ${token}`,
