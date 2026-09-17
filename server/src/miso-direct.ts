@@ -38,7 +38,8 @@ function toCentralDateStr(d: Date): string {
   const y = central.getFullYear();
   const m = String(central.getMonth() + 1).padStart(2, "0");
   const dy = String(central.getDate()).padStart(2, "0");
-  return `${y}${m}${dy}`;
+  // MISO API requires YYYY-MM-DD format (not YYYYMMDD).
+  return `${y}-${m}-${dy}`;
 }
 
 export async function pollMisoIndianaHub(): Promise<MisoPollResult> {
@@ -115,8 +116,9 @@ export async function pollMisoIndianaHub(): Promise<MisoPollResult> {
       if (interval) {
         const [hh, mm] = String(interval).split(":").map(Number);
         // Construct a Central-time Date and convert to UTC ISO string.
+        // dateStr is now YYYY-MM-DD, so it can be used directly in an ISO datetime string.
         const centralDate = new Date(
-          `${dateStr.slice(0, 4)}-${dateStr.slice(4, 6)}-${dateStr.slice(6, 8)}T${String(hh ?? 0).padStart(2, "0")}:${String(mm ?? 0).padStart(2, "0")}:00`
+          `${dateStr}T${String(hh ?? 0).padStart(2, "0")}:${String(mm ?? 0).padStart(2, "0")}:00`
         );
         // Approximate Central offset (CST=-6, CDT=-5). Node will adjust if TZ is set.
         intervalStartUtc = centralDate.toISOString();
