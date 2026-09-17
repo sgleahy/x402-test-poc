@@ -6,9 +6,9 @@
  *   ERCOT    → ercot-direct.ts  (direct ISO API, no GridStatus)
  *   MISO     → miso-direct.ts   (direct ISO API, no GridStatus)
  *   NYISO    → nyiso-direct.ts  (direct ISO API — public CSV, no auth)
- *   PJM      → GridStatus.io    (TODO: build pjm-direct.ts)
- *   CAISO    → GridStatus.io    (TODO: build caiso-direct.ts)
- *   ISONE    → GridStatus.io    (TODO: build isone-direct.ts)
+ *   PJM      → pjm-direct.ts    (direct PJM Data Miner 2 API)
+ *   CAISO    → caiso-direct.ts  (direct CAISO OASIS API — public, no auth)
+ *   ISONE    → isone-direct.ts   (direct ISO-NE Web Services API)
  *   SPP      → GridStatus.io    (TODO: build spp-direct.ts)
  *
  * GridStatus legal note: GridStatus's ToS (§4.2) prohibits using their
@@ -30,6 +30,9 @@ import { HUBS } from "./hubs.js";
 import { pollErcotHubAvg } from "./ercot-direct.js";
 import { pollMisoIndianaHub } from "./miso-direct.js";
 import { pollNyisoZoneJ } from "./nyiso-direct.js";
+import { pollPjmWesternHub } from "./pjm-direct.js";
+import { pollCaisoNp15, spotCheckCaisoHistory } from "./caiso-direct.js";
+import { pollIsoneInternalHub } from "./isone-direct.js";
 
 const BASE = "https://api.gridstatus.io/v1/datasets";
 
@@ -58,7 +61,7 @@ export interface PricePollResult {
 // ── Direct-connector dispatch ───────────────────────────────────────────────
 // These hubs are served by direct ISO connections. They do NOT go through
 // the GridStatus fetch block below.
-const DIRECT_HUB_SET = new Set(["ERCOT_HB_HUBAVG", "MISO_INDIANA", "NYISO_ZONEJ"]);
+const DIRECT_HUB_SET = new Set(["ERCOT_HB_HUBAVG", "MISO_INDIANA", "NYISO_ZONEJ", "PJM_WEST", "CAISO_NP15", "ISONE_MASSHUB"]);
 
 export async function pollLatestPrices(): Promise<PricePollResult[]> {
   const now = new Date();
@@ -88,7 +91,34 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
       continue;
     }
 
-    // ── GridStatus fallback (4 remaining hubs) ────────────────────────────
+    if (cfg.hub === "PJM_WEST") {
+      const r = await pollPjmWesternHub();
+      await upsertIfOk(cfg.hub, r.intervalStartUtc, r.price);
+      results.push({ hub: cfg.hub, ...r });
+      continue;
+    }
+
+    if (cfg.hub === "CAISO_NP15") {
+      const r = await pollCaisoNp15();
+      await upsertIfOk(cfg.hub, r.intervalStartUtc, r.price);
+      results.push({ hub: cfg.hub, ...r });
+      // Fire spot-check async (no await) — re-verifies 3 random recent intervals
+      // against live CAISO data to catch price revisions. Runs in the background
+      // and does not block the poll cycle. ZIP files are processed in-memory only.
+      spotCheckCaisoHistory().catch((e) =>
+        console.error("[price-poller] CAISO spot-check error:", e)
+      );
+      continue;
+    }
+
+    if (cfg.hub === "ISONE_MASSHUB") {
+      const r = await pollIsoneInternalHub();
+      await upsertIfOk(cfg.hub, r.intervalStartUtc, r.price);
+      results.push({ hub: cfg.hub, ...r });
+      continue;
+    }
+
+    // ── GridStatus fallback (1 remaining hub: SPP) ────────────────────────
     if (gridStatusCallCount > 0 || i > 0) await sleep(REQUEST_SPACING_MS);
     gridStatusCallCount++;
 
