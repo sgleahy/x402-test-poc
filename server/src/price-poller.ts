@@ -33,6 +33,7 @@ import { pollNyisoZoneJ } from "./nyiso-direct.js";
 import { pollPjmWesternHub } from "./pjm-direct.js";
 import { pollCaisoNp15, spotCheckCaisoHistory } from "./caiso-direct.js";
 import { pollIsoneInternalHub } from "./isone-direct.js";
+import { pollSppSouthHub } from "./spp-direct.js";
 
 const BASE = "https://api.gridstatus.io/v1/datasets";
 
@@ -61,7 +62,7 @@ export interface PricePollResult {
 // ── Direct-connector dispatch ───────────────────────────────────────────────
 // These hubs are served by direct ISO connections. They do NOT go through
 // the GridStatus fetch block below.
-const DIRECT_HUB_SET = new Set(["ERCOT_HB_HUBAVG", "MISO_INDIANA", "NYISO_ZONEJ", "PJM_WEST", "CAISO_NP15", "ISONE_MASSHUB"]);
+const DIRECT_HUB_SET = new Set(["ERCOT_HB_HUBAVG", "MISO_INDIANA", "NYISO_ZONEJ", "PJM_WEST", "CAISO_NP15", "ISONE_MASSHUB", "SPP_SOUTH"]);
 
 export async function pollLatestPrices(): Promise<PricePollResult[]> {
   const now = new Date();
@@ -118,7 +119,14 @@ export async function pollLatestPrices(): Promise<PricePollResult[]> {
       continue;
     }
 
-    // ── GridStatus fallback (1 remaining hub: SPP) ────────────────────────
+    if (cfg.hub === "SPP_SOUTH") {
+      const r = await pollSppSouthHub();
+      await upsertIfOk(cfg.hub, r.intervalStartUtc, r.price);
+      results.push({ hub: cfg.hub, ...r });
+      continue;
+    }
+
+    // ── GridStatus fallback (no hubs remaining — kept as safety net) ──────
     if (gridStatusCallCount > 0 || i > 0) await sleep(REQUEST_SPACING_MS);
     gridStatusCallCount++;
 
