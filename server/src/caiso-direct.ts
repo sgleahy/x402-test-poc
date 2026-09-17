@@ -83,20 +83,30 @@ async function extractFirstZipEntry(zipBuffer: Buffer): Promise<string> {
   }
 
   const compressionMethod = zipBuffer.readUInt16LE(8);
-  const compressedSize = zipBuffer.readUInt32LE(18);
   const filenameLen = zipBuffer.readUInt16LE(26);
   const extraLen = zipBuffer.readUInt16LE(28);
   const dataOffset = 30 + filenameLen + extraLen;
-  const compressedData = zipBuffer.subarray(dataOffset, dataOffset + compressedSize);
 
   if (compressionMethod === 0) {
-    return compressedData.toString("utf8");
+    // Stored (no compression) — size is reliable in local header for non-streaming ZIPs.
+    const compressedSize = zipBuffer.readUInt32LE(18);
+    if (compressedSize === 0) return "";
+    return zipBuffer.subarray(dataOffset, dataOffset + compressedSize).toString("utf8");
   }
 
   if (compressionMethod === 8) {
     const { inflateRaw } = await import("node:zlib");
     const { promisify } = await import("node:util");
     const inflateRawAsync = promisify(inflateRaw);
+    // CAISO uses streaming ZIP generators that set bit 3 in the general-purpose
+    // flag, meaning the local file header stores compressedSize = 0 (the real
+    // size appears in a data descriptor AFTER the compressed data). Passing only
+    // compressedData bytes causes "unexpected end of file" because we get 0 bytes.
+    // Fix: pass everything from the data start to the end of the buffer. inflateRaw
+    // knows when the deflate stream ends internally and ignores any trailing bytes
+    // (the data descriptor, the next entry's header, etc.).
+    const compressedData = zipBuffer.subarray(dataOffset);
+    if (compressedData.length === 0) return "";
     const decompressed = await inflateRawAsync(compressedData);
     return decompressed.toString("utf8");
   }
