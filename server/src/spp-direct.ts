@@ -21,9 +21,11 @@
  *   MCC              — marginal congestion component
  *   MEC              — marginal energy component
  *
- * Note: SPP portal does not use Akamai WAF — direct fetch works from Railway.
- * No proxy needed.
+ * Note: SPP portal blocks Railway outbound IPs (not Akamai, but still filtered).
+ * Uses proxyFetch (Cloudflare Worker) same as MISO and NYISO.
  */
+
+import { proxyFetch } from "./proxy-fetch.js";
 
 const SPP_LATEST_URL =
   "https://portal.spp.org/file-browser-api/download/rtbm-lmp-by-location?path=%2FRTBM-LMP-SL-latestInterval.csv";
@@ -83,7 +85,8 @@ function splitCsvLine(line: string): string[] {
 // ── Main poll function ────────────────────────────────────────────────────────
 export async function pollSppSouthHub(): Promise<SppPollResult> {
   try {
-    const res = await fetch(SPP_LATEST_URL, {
+    // portal.spp.org blocks Railway outbound IPs — route through Cloudflare proxy.
+    const res = await proxyFetch(SPP_LATEST_URL, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
