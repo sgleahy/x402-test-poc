@@ -68,8 +68,9 @@ export async function pollMisoIndianaHub(): Promise<MisoPollResult> {
       });
 
       if (!res.ok) {
-        if (res.status === 404 && dateStr === datesToTry[0]) {
-          // Today's file might not exist yet — try yesterday next.
+        if ((res.status === 404 || res.status === 400) && dateStr === datesToTry[0]) {
+          // Today's data not published yet (404 = no file, 400 = "data not available
+          // yet for this market date") — fall back to yesterday.
           continue;
         }
         const snippet = (await res.text().catch(() => "")).slice(0, 300);
