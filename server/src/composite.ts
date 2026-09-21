@@ -101,14 +101,29 @@ export async function computeAndStoreLatestComposite(): Promise<CompositeResult 
 
     if (!latestIntervalUtc) return null;
 
-    const validHubs = detail.filter((d) => d.priceCapped !== null && d.load !== null && d.load > 0);
+    // Hubs with a valid price (load data is optional — we fall back to equal weighting).
+    const validHubs = detail.filter((d) => d.priceCapped !== null);
     if (validHubs.length === 0) return null;
 
-    const totalLoad = validHubs.reduce((sum, d) => sum + (d.load as number), 0);
+    // Use load-weighted average only when ALL valid hubs have load data.
+    // If any hub is missing load, fall back to equal weights so every hub
+    // with a live price contributes rather than being silently zeroed out.
+    const allHaveLoad = validHubs.every((d) => d.load !== null && (d.load as number) > 0);
+    const totalLoad = allHaveLoad ? validHubs.reduce((sum, d) => sum + (d.load as number), 0) : 0;
     let elecPrice = 0;
-    for (const d of validHubs) {
-      d.weight = (d.load as number) / totalLoad;
-      elecPrice += (d.priceCapped as number) * d.weight;
+    if (allHaveLoad && totalLoad > 0) {
+      // Full load-weighted average.
+      for (const d of validHubs) {
+        d.weight = (d.load as number) / totalLoad;
+        elecPrice += (d.priceCapped as number) * d.weight;
+      }
+    } else {
+      // Equal-weight average (used when load data is incomplete or unavailable).
+      const equalWeight = 1 / validHubs.length;
+      for (const d of validHubs) {
+        d.weight = equalWeight;
+        elecPrice += (d.priceCapped as number) * equalWeight;
+      }
     }
 
     const nHubsCapped = detail.filter((d) => d.wasCapped).length;
