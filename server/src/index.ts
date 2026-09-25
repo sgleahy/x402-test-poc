@@ -76,7 +76,14 @@ app.use(
     false, // syncFacilitatorOnStart
   ),
 );
-
+app.get("/api/debug/cdp-test", async (req, res) => {
+  try {
+    await ensureFacilitatorReady();
+    res.json({ status: "facilitator initialized OK" });
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message, stack: (err as Error).stack });
+  }
+});
 app.use("/api/test", testRouter);
 app.use("/api/elec", elecRouter);
 
