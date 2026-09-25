@@ -8,7 +8,17 @@ import { startScheduler } from "./scheduler.js";
 import { runMigrations } from "./migrate.js";
 
 const app = express();
-app.use(express.json());
+app.use(express.json());   // Allow browser clients (including claude.ai artifacts) to call this API
+   app.use((req, res, next) => {
+     res.setHeader("Access-Control-Allow-Origin", "*");
+     res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+     res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Payment");
+     if (req.method === "OPTIONS") {
+       res.sendStatus(204);
+       return;
+     }
+     next();
+   });
 
 // Guard in front of the x402 middleware: lazily initializes the facilitator
 // connection (fetches supported payment kinds from CDP) on the first real
