@@ -13,6 +13,7 @@ app.use(express.json());   // Allow browser clients (including claude.ai artifac
      res.setHeader("Access-Control-Allow-Origin", "*");
      res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
      res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Payment");
+      res.setHeader("Access-Control-Expose-Headers", "payment-required, x-payment-response");
      if (req.method === "OPTIONS") {
        res.sendStatus(204);
        return;
